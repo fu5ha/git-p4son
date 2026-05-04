@@ -189,6 +189,9 @@ class TestP4FstatFileInfo(unittest.TestCase):
         self.assertEqual(result['/ws/foo.txt'].digest, 'ABC123')
         self.assertEqual(result['/ws/bar.bin'].head_type, 'binary+l')
         self.assertIsNone(result['/ws/bar.bin'].digest)
+        # -Ol is required for the server to return digest values
+        args = mock_run.call_args[0][0]
+        self.assertIn('-Ol', args)
 
     def test_empty_input(self):
         result = p4_fstat_file_info([], '/ws')

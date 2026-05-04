@@ -366,13 +366,14 @@ def p4_fstat_file_info(filenames: list[str],
     """Get Perforce file type and MD5 digest for a list of files.
 
     Returns a mapping of local path to P4FileInfo. Files not found are omitted.
-    The digest field is None for binary files (Perforce does not store digests
-    for them).
+    The digest field may be None if the server does not return it.
     """
     if not filenames:
         return {}
     # Use -x - so the path list doesn't hit the command-line length limit.
-    args = ['p4', '-x', '-', '-ztag', 'fstat',
+    # -Ol forces the server to include digest and fileSize fields; without it
+    # some servers omit digest even when requested via -T.
+    args = ['p4', '-x', '-', '-ztag', 'fstat', '-Ol',
             '-T', 'clientFile,headType,digest']
     result = run(args, cwd=workspace_dir, input='\n'.join(filenames))
     info = {}
