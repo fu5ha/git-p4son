@@ -81,6 +81,80 @@ git p4son alias delete my-fancy-feature
 git checkout -b my-next-fancy-feature
 ```
 
+## Jujutsu (jj)
+
+git-p4son detects a `.jj` workspace colocated with the Git repository. This requires jj 0.41 or newer.
+Separate jj workspaces, sparse working copies, conflicted revisions and divergent changes are not supported.
+The existing Git workflow is unchanged in repositories without `.jj`.
+
+In a jj workspace:
+
+- `new`, `update` and `list-changes` include the working change `@`. An empty, undescribed, bookmark-free `@`
+  with one parent is skipped, so a fresh working change above a feature still refers to that feature.
+- Default aliases come from the one local bookmark at the selected change, with `/` replaced by `-`.
+  If there is no bookmark or there are several, pass the alias or changelist explicitly.
+- The default message is the selected change's first description line. Use `jj describe`, `-m` or `-F`.
+- `-b/--base-branch` accepts a jj revision expression resolving to one change: a bookmark, change ID or commit
+  ID, for example. The default is the selected change's parent, rather than Git's literal `HEAD~1`.
+- `new` and `update` use jj's initial working-copy snapshot, verify it has not changed while acquiring the
+  lock, and reject non-ignored files jj left untracked. They do not rehash tracked files. You do not need to
+  create a separate committed change before opening them in Perforce. Before destructive Perforce reverts,
+  git-p4son saves the affected working files and restores those copies afterward, preserving their bytes,
+  line endings and permissions instead of reconstructing them from the Git index.
+
+For example:
+
+```sh
+jj git init                  # Add jj to an existing git-p4son Git repository
+jj new main
+git p4son sync
+
+jj new main -m "Fix login"
+# Edit files
+jj bookmark create fix-login
+git p4son new -b main --review
+# Edit more files
+git p4son update -b main --shelve
+```
+
+### Syncing a bookmark
+
+Run `jj new main` before syncing. `sync` requires an empty, undescribed, bookmark-free working change with
+one parent and advances the bookmark at that parent after each completed sync commit. When several bookmarks
+point there, choose one with `git p4son sync --bookmark main`; the other bookmarks stay where they were.
+
+Sync still uses Git for staging and committing, including Git attributes and filters. Its staging command
+sets `core.autocrlf` to match jj's EOL policy. Local changes that sync merges back are left in the new working
+change for you to review.
+
+### Locking and the Git escape hatch
+
+git-p4son holds jj's working-copy lock while workspace commands run, including sync hooks and temporary
+Perforce reverts. A busy lock stops the command. Other jj processes cannot snapshot intermediate files.
+Queries during the operation use a pinned jj operation without snapshotting.
+
+Initial snapshotting and final reconciliation happen outside this lock. Another jj command can import the
+completed Git changes before git-p4son does; this is not one atomic jj transaction. The lock does not exclude
+editors, Git commands or repository operations from another jj workspace. If an operation fails, inspect the
+workspace before continuing; the lock is released, but partially completed Perforce operations are not undone.
+
+Hooks must not run ordinary jj commands: they would wait for the lock held by their caller. Read-only queries
+such as `jj --at-op=@ log` avoid snapshotting and Git import.
+
+`review` and `update --per-commit` use Git rebase and are disabled by default in jj workspaces. To deliberately
+use the existing Git workflow, pass the global `--ignore-jj` flag **before** the command:
+
+```sh
+git switch fix-login
+git p4son --ignore-jj review -b main
+git p4son --ignore-jj update --per-commit --shelve -b main
+```
+
+This uses Git branches, `HEAD` and Git's clean-workspace checks, while retaining jj snapshot protection.
+Generated rebase steps inherit the override and reuse the parent's lock. If a rebase stops, that lock is
+released; a later `git rebase --continue` does not protect the entire resumed rebase, although its git-p4son
+steps each acquire the lock.
+
 ## Installation
 
 ```sh
@@ -867,4 +941,3 @@ Add the following to your PowerShell profile (`$PROFILE`):
 ```
 
 All three enable completion for `git p4son <TAB>` and `git-p4son <TAB>`.
-

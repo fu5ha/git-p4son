@@ -65,6 +65,18 @@ The CLI (`cli.py`) dispatches to command modules, each exposing a `*_command(arg
 clean, opening the git changes for edit, and reverting files no longer part of the git change
 (`revert_unchanged_files`).
 
+**`jj.py`** detects colocated jj workspaces, pins an operation, resolves the selected change and bookmarks,
+and supplies explicit Git revisions to commands. `cli.py` wraps workspace commands in its operation
+context. Git still handles object reads, diffs and sync commits; sync explicitly advances its selected bookmark.
+An empty, undescribed, bookmark-free working change selects its parent. `--ignore-jj` keeps Git semantics,
+including the rebase workflows, without disabling locking.
+In jj mode, `lib.py` preserves affected working files around destructive Perforce reverts; Git-only mode
+continues restoring from the index.
+
+**`jj_lock.py`** holds jj's local working-copy lock using its Unix `flock` and Windows `LockFileEx` protocols.
+jj 0.41+ is required. Snapshotting and reconciliation run outside the lock; pinned queries run inside it.
+Hooks must not invoke snapshotting jj commands. Nested Git rebase steps inherit the parent's lock ownership.
+
 **`description.py`** models a changelist description (`Description`): the message, the enumerated commit list under
 `Changes included:`, trailing text, and Swarm `#review` keywords on lines of their own. `parse` and `format` own the
 layout; `new` and `update` build descriptions through it.
