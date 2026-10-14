@@ -3,6 +3,7 @@
 import os
 import os.path
 import re
+import tempfile
 from dataclasses import dataclass, field
 
 from .common import (
@@ -96,8 +97,13 @@ def _get_rebase_branch(workspace_dir: str) -> str | None:
 
 def get_head_subject(workspace_dir: str) -> str | None:
     """Return the subject line of the HEAD commit, or None on failure."""
+    return get_subject('HEAD', workspace_dir)
+
+
+def get_subject(revision: str, workspace_dir: str) -> str | None:
+    """Return the subject of a revision, or None on failure."""
     try:
-        result = run(['git', 'log', '-1', '--format=%s', 'HEAD'],
+        result = run(['git', 'log', '-1', '--format=%s', revision],
                      cwd=workspace_dir)
         subject = result.stdout[0].strip() if result.stdout else ''
         return subject or None
@@ -126,11 +132,25 @@ def get_dirty_files(workspace_dir: str) -> list[tuple[str, str]]:
     return files
 
 
+def get_untracked_files(revision: str, workspace_dir: str) -> list[str]:
+    """List non-ignored files absent from a revision without changing the real index."""
+    with tempfile.TemporaryDirectory(prefix='git-p4son-index-') as directory:
+        env = {'GIT_INDEX_FILE': os.path.join(directory, 'index')}
+        run(['git', 'read-tree', revision], cwd=workspace_dir, env=env)
+        result = run(['git', 'ls-files', '--others', '--exclude-standard', '-z'],
+                     cwd=workspace_dir, env=env, text=False)
+        return _nul_fields(result.stdout)
+
+
 # --- staging and committing ---
 
-def add_all_files(workspace_dir: str) -> None:
+def add_all_files(workspace_dir: str, *, eol_conversion: str | None = None) -> None:
     """Stage every change in the workspace, untracked files included."""
-    run(['git', 'add', '.'], cwd=workspace_dir)
+    command = ['git']
+    if eol_conversion is not None:
+        autocrlf = {'none': 'false', 'input': 'input', 'input-output': 'true'}
+        command += ['-c', f'core.autocrlf={autocrlf[eol_conversion]}']
+    run(command + ['add', '.'], cwd=workspace_dir)
 
 
 def add_files(filepaths: list[str], workspace_dir: str) -> None:
@@ -173,11 +193,12 @@ class LocalChanges:
     moves: list[tuple[str, str]] = field(default_factory=list)
 
 
-def get_local_changes(base_branch: str, workspace_dir: str) -> LocalChanges:
-    """Get local git changes between base_branch and HEAD."""
+def get_local_changes(base_branch: str, workspace_dir: str, *,
+                      revision: str = 'HEAD') -> LocalChanges:
+    """Get local changes between the merge base and revision."""
     # ...HEAD diffs from the merge base, so changes on base_branch since the fork are left out.
     # -z: paths verbatim, not C-quoted, as "<status>\0<path>\0", with a second path for renames and copies.
-    res = run(['git', 'diff', '--name-status', '-z', f'{base_branch}...HEAD'],
+    res = run(['git', 'diff', '--name-status', '-z', f'{base_branch}...{revision}'],
               cwd=workspace_dir, text=False)
 
     changes = LocalChanges()
@@ -205,37 +226,45 @@ def get_local_changes(base_branch: str, workspace_dir: str) -> LocalChanges:
 
 # --- log ---
 
-def get_commit_lines_since(base_branch: str, workspace_dir: str) -> list[str]:
+def get_commit_lines_since(base_branch: str, workspace_dir: str, *,
+                           revision: str = 'HEAD') -> list[str]:
     """Return "<short sha> <subject>" lines for the non-merge commits since base_branch, oldest first."""
     # Not --oneline: log.decorate config would prepend "(HEAD -> branch)" to subjects.
     res = run(['git', 'log', '--format=%h %s', '--no-decorate',
                '--reverse', '--no-merges',
-               f'{base_branch}..HEAD'], cwd=workspace_dir)
+               f'{base_branch}..{revision}'], cwd=workspace_dir)
     return res.stdout
 
 
-def get_commit_subjects_since(base_branch: str, workspace_dir: str) -> list[str]:
+def get_commit_subjects_since(base_branch: str, workspace_dir: str, *,
+                              revision: str = 'HEAD') -> list[str]:
     """Return the subjects of the non-merge commits since base_branch, oldest first."""
     return [line.split(' ', 1)[-1]
-            for line in get_commit_lines_since(base_branch, workspace_dir)]
+            for line in get_commit_lines_since(base_branch, workspace_dir,
+                                               revision=revision)]
 
 
 # --- tracking ---
 
-def get_tracked_files(filepaths: list[str], workspace_dir: str) -> set[str]:
+def get_tracked_files(filepaths: list[str], workspace_dir: str, *,
+                      revision: str | None = None) -> set[str]:
     """Return the subset of filepaths that are tracked by git."""
     if not filepaths:
         return set()
     # One listing of the index; pathspecs make git match every entry against every path.
-    tracked = set(list_tracked_files(workspace_dir))
+    tracked = set(list_tracked_files(workspace_dir) if revision is None
+                  else list_tracked_files(workspace_dir, revision=revision))
     return {filepath for filepath in filepaths
             if normalize_workspace_path(filepath, workspace_dir) in tracked}
 
 
-def list_tracked_files(workspace_dir: str) -> list[str]:
+def list_tracked_files(workspace_dir: str, *,
+                       revision: str | None = None) -> list[str]:
     """Return every file tracked by git, as repo-relative slash paths."""
     # -z: non-ASCII paths verbatim, not C-quoted.
-    result = run(['git', 'ls-files', '-z'], cwd=workspace_dir, text=False)
+    command = (['git', 'ls-files', '-z'] if revision is None else
+               ['git', 'ls-tree', '-r', '--name-only', '-z', revision])
+    result = run(command, cwd=workspace_dir, text=False)
     return _nul_fields(result.stdout)
 
 
