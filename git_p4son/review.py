@@ -31,6 +31,9 @@ def review_command(args: argparse.Namespace) -> int:
 
     new_cmd, update_cmd = _step_commands(args.alias, args.force,
                                          args.no_commit_list)
+    if getattr(args, 'ignore_jj', False) is True:
+        new_cmd = '--ignore-jj ' + new_cmd
+        update_cmd = '--ignore-jj ' + update_cmd
     return rebase_per_commit(new_cmd, update_cmd, args.base_branch,
                              workspace_dir, message=args.message,
                              sleep=SWARM_SHELF_DELAY,

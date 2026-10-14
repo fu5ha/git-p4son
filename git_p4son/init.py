@@ -4,6 +4,7 @@ import argparse
 import os
 import shutil
 
+from . import jj
 from .common import prompt_choice, prompt_menu
 from .config import save_config
 from .depot import (
@@ -157,6 +158,12 @@ def _setup_gitignore(cwd: str) -> str:
 def init_command(args: argparse.Namespace) -> int:
     """Execute the init command."""
     cwd = os.getcwd()
+    with jj.operation(cwd, ignore=True, snapshot=False):
+        return _init_workspace(cwd)
+
+
+def _init_workspace(cwd: str) -> int:
+    """Configure the Perforce workspace and its Git repository."""
 
     log.heading('Checking Perforce workspace')
     spec = get_client_spec(cwd)

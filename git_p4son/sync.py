@@ -15,6 +15,7 @@ from .git import (
 )
 from .hooks import run_hooks
 from .lib import check_git_workspace_clean
+from .jj import Workspace
 from .depot import resolve_depot_root
 from .log import log
 from .processes import check_no_blocking_processes
@@ -709,6 +710,9 @@ def sync_command(args: argparse.Namespace) -> int:
         return 0
 
     log.heading('Finding HEAD commit')
+    workspace = getattr(args, 'jj_workspace', None)
+    if isinstance(workspace, Workspace):
+        workspace.detach_for_sync()
     pre_sync_head_commit = get_head_commit(workspace_dir)
     log.success(f'{pre_sync_head_commit}')
 
@@ -728,10 +732,16 @@ def sync_command(args: argparse.Namespace) -> int:
             preps.append(sync_pass(changelist, changelist_label))
 
             log.heading(f'Committing git changes for CL {changelist}')
-            add_all_files(workspace_dir)
+            if isinstance(workspace, Workspace):
+                add_all_files(
+                    workspace_dir, eol_conversion=workspace.eol_conversion)
+            else:
+                add_all_files(workspace_dir)
             staged = get_staged_files(workspace_dir)
             commit(format_sync_subject(depot_root, changelist), workspace_dir,
                    allow_empty=True)
+            if isinstance(workspace, Workspace):
+                workspace.advance_sync()
             log.success(f'Committed {len(staged)} files')
 
         # Dedup files that showed up in several sync passes.

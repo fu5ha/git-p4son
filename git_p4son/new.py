@@ -9,15 +9,20 @@ from .lib import (
 )
 from .perforce import p4_shelve_changelist
 from .log import log
+from .jj import Workspace, revision_options
 
 
 def new_command(args: argparse.Namespace) -> int:
     """Execute the new command."""
     workspace_dir = args.workspace_dir
+    options = revision_options(args)
 
-    # Opening and reverting files relies on every tracked file matching HEAD.
-    if not args.no_edit and not check_git_workspace_clean(workspace_dir):
-        return 1
+    if not args.no_edit:
+        workspace = getattr(args, 'jj_workspace', None)
+        clean = (workspace.check_untracked_files() if isinstance(workspace, Workspace)
+                 else check_git_workspace_clean(workspace_dir))
+        if not clean:
+            return 1
 
     if args.alias and not check_alias_usable(args.alias, workspace_dir,
                                              args.force):
@@ -26,7 +31,7 @@ def new_command(args: argparse.Namespace) -> int:
     log.heading('Creating changelist')
     changelist = create_changelist(
         args.message, args.base_branch, workspace_dir, dry_run=args.dry_run,
-        commit_list=not args.no_commit_list, review=args.review)
+        commit_list=not args.no_commit_list, review=args.review, **options)
 
     if not args.dry_run:
         if args.alias:
@@ -39,7 +44,7 @@ def new_command(args: argparse.Namespace) -> int:
 
     if not args.no_edit:
         open_changes_and_revert_unchanged(changelist, args.base_branch,
-                                          workspace_dir, args.dry_run)
+                                          workspace_dir, args.dry_run, **options)
 
     if args.shelve or args.review:
         log.heading('Shelving')
